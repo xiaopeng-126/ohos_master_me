@@ -3,20 +3,22 @@
 This repository is the HarmonyOS PC adaptation of
 [trummerschlunk/master_me](https://github.com/trummerschlunk/master_me).
 
-![master_me running on HarmonyOS PC](docs/master_me-harmonyos-pc.jpeg)
+![master_me running on HarmonyOS PC](docs/masterme-v3-live.jpeg)
 
-The first milestone keeps the original Faust DSP as the audio source of truth and
+The port keeps the original Faust DSP as the audio source of truth and
 replaces the desktop DPF/Pugl window with a HarmonyOS Stage application and ArkUI
 front end. The native module builds the generated DPF/Faust processor into
-`libmasterme.so` and exposes block processing, parameter control and presets to
-ArkTS.
+`libmasterme.so`, connects OHAudio full-duplex device I/O, and exposes audio,
+parameter and meter control to ArkTS.
 
 ## Current scope
 
 - HarmonyOS 2-in-1 Stage application under `harmony/`.
 - Native NAPI bridge for the original stereo mastering processor.
 - Easy/Expert control surface with the five upstream easy presets.
-- Interleaved float32 stereo block API ready for HarmonyOS audio I/O.
+- OHAudio 48 kHz stereo full-duplex capture, DSP and render pipeline.
+- Live input/output meters, loudness history, callback health and stream control.
+- Microphone permission, device-change tracking and throttled stream recovery.
 - ARM64 and x86_64 native build targets for HarmonyOS PC and emulators.
 - Upstream DSP, DPF and presets remain unchanged under `plugin/`, `pregen/` and
   `dpf/`.
@@ -58,16 +60,21 @@ The `libmasterme.so` module exposes:
 - `getParameter(handle, parameterIndex)`
 - `processInterleaved(handle, input, output, frameCount)`
 - `getMeterSnapshot(handle)`
+- `startAudio(handle)`
+- `stopAudio(handle)`
+- `getAudioStatus(handle)`
 
 `input` and `output` are `Float32Array` objects containing interleaved stereo
 samples. The process API returns the current input/output LUFS-S and peak values.
+The audio status API reports stream state, callback frames, underruns, overflows,
+device changes, recovery count and the last error.
 
-## Next port milestone
+## Validation status
 
-The native and ArkUI surfaces are connected. The remaining device integration is
-the OHAudio full-duplex transport: AudioCapturer -> NAPI process -> AudioRenderer,
-plus device hot-plug and stream recovery. Keeping that work behind the block API
-allows the DSP and UI to be tested independently of the audio device.
+The full-duplex audio path, microphone permission, live meters, stop control and
+engine self-test have been verified on a HarmonyOS API 26 `2in1` emulator.
+Physical-device routing, microphone quality, hot-plug fault injection and signed
+release installation remain to be validated on HarmonyOS PC hardware.
 
 ## Upstream
 

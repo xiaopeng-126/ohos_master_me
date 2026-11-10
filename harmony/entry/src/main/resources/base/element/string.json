@@ -11,6 +11,10 @@
     {
       "name": "EntryAbility_label",
       "value": "master_me"
+    },
+    {
+      "name": "microphone_reason",
+      "value": "Capture microphone audio for real-time mastering and monitoring"
     }
   ]
 }

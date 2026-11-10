@@ -7,6 +7,22 @@ export interface MeterSnapshot {
   outputPeak: number;
 }
 
+export interface AudioStatus {
+  running: boolean;
+  requested: boolean;
+  sampleRate: number;
+  channels: number;
+  callbackFrames: number;
+  captureCallbacks: number;
+  renderCallbacks: number;
+  underruns: number;
+  overflows: number;
+  deviceChangeCount: number;
+  recoveryCount: number;
+  errorCount: number;
+  lastError: string;
+}
+
 export class MasterMeEngine {
   private handle: Object;
 
@@ -32,6 +48,18 @@ export class MasterMeEngine {
 
   getMeterSnapshot(): MeterSnapshot {
     return nativeEngine.getMeterSnapshot(this.handle);
+  }
+
+  startAudio(): AudioStatus {
+    return nativeEngine.startAudio(this.handle);
+  }
+
+  stopAudio(): AudioStatus {
+    return nativeEngine.stopAudio(this.handle);
+  }
+
+  getAudioStatus(): AudioStatus {
+    return nativeEngine.getAudioStatus(this.handle);
   }
 
   destroy(): void {

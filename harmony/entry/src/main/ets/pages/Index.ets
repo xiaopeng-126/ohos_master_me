@@ -1,4 +1,5 @@
-import { MasterMeEngine, MeterSnapshot } from '../engine/MasterMeEngine';
+import { abilityAccessCtrl, Permissions } from '@kit.AbilityKit';
+import { AudioStatus, MasterMeEngine, MeterSnapshot } from '../engine/MasterMeEngine';
 
 class Preset {
   name: string;
@@ -134,20 +135,42 @@ struct Index {
   @State outputPeak: number = -3.2;
   @State engineState: string = 'ENGINE READY';
   @State selfTestPassed: boolean = false;
+  @State audioRunning: boolean = false;
+  @State audioRequested: boolean = false;
+  @State audioStatusText: string = 'LIVE AUDIO OFF';
+  @State callbackFrames: number = 0;
+  @State underruns: number = 0;
+  @State deviceChangeCount: number = 0;
 
   private engine?: MasterMeEngine = undefined;
+  private audioTimer: number = -1;
+  private canvasReady: boolean = false;
+  private inputHistory: number[] = [];
+  private outputHistory: number[] = [];
+  private historySettings: RenderingContextSettings = new RenderingContextSettings(true);
+  private historyContext: CanvasRenderingContext2D =
+    new CanvasRenderingContext2D(this.historySettings);
 
   aboutToAppear(): void {
     try {
       this.engine = new MasterMeEngine(48000, 512);
       this.applyPreset(0, false);
       this.engineState = 'DSP ONLINE';
+      this.audioTimer = setInterval(() => {
+        this.refreshAudioStatus();
+      }, 250);
     } catch (error) {
       this.engineState = 'DSP OFFLINE';
+      this.audioStatusText = 'AUDIO UNAVAILABLE';
     }
   }
 
   aboutToDisappear(): void {
+    if (this.audioTimer >= 0) {
+      clearInterval(this.audioTimer);
+      this.audioTimer = -1;
+    }
+    this.engine?.stopAudio();
     this.engine?.destroy();
   }
 
@@ -172,6 +195,74 @@ struct Index {
 
   private setParameter(index: number, value: number): void {
     this.engine?.setParameter(index, value);
+  }
+
+  private applyAudioStatus(status: AudioStatus): void {
+    this.audioRunning = status.running;
+    this.audioRequested = status.requested;
+    this.callbackFrames = status.callbackFrames;
+    this.underruns = status.underruns;
+    this.deviceChangeCount = status.deviceChangeCount;
+    if (status.lastError.length > 0) {
+      this.audioStatusText = status.lastError.toUpperCase();
+    } else if (status.running) {
+      this.audioStatusText = `LIVE ${status.sampleRate / 1000} kHz / ${status.channels} CH`;
+    } else if (status.requested) {
+      this.audioStatusText = 'AUDIO STARTING';
+    } else {
+      this.audioStatusText = 'LIVE AUDIO OFF';
+    }
+  }
+
+  private refreshAudioStatus(): void {
+    if (this.engine === undefined) {
+      return;
+    }
+
+    try {
+      const meters = this.engine.getMeterSnapshot();
+      this.inputLufs = meters.inputLufs;
+      this.outputLufs = meters.outputLufs;
+      this.outputPeak = meters.outputPeak;
+      this.applyAudioStatus(this.engine.getAudioStatus());
+      this.updateHistory();
+    } catch (error) {
+      this.audioStatusText = 'AUDIO STATUS ERROR';
+    }
+  }
+
+  private async startLiveAudio(): Promise<void> {
+    if (this.engine === undefined) {
+      this.audioStatusText = 'DSP OFFLINE';
+      return;
+    }
+
+    this.audioStatusText = 'REQUESTING MICROPHONE';
+    try {
+      const permissions: Permissions[] = ['ohos.permission.MICROPHONE'];
+      const manager = abilityAccessCtrl.createAtManager();
+      const hostContext = this.getUIContext().getHostContext();
+      if (hostContext === undefined) {
+        this.audioStatusText = 'APPLICATION CONTEXT UNAVAILABLE';
+        return;
+      }
+      const result = await manager.requestPermissionsFromUser(hostContext, permissions);
+      if (result.authResults.length === 0 || result.authResults[0] !== 0) {
+        this.audioStatusText = 'MICROPHONE PERMISSION REQUIRED';
+        return;
+      }
+
+      this.applyAudioStatus(this.engine.startAudio());
+    } catch (error) {
+      this.audioStatusText = 'MICROPHONE REQUEST FAILED';
+    }
+  }
+
+  private stopLiveAudio(): void {
+    if (this.engine === undefined) {
+      return;
+    }
+    this.applyAudioStatus(this.engine.stopAudio());
   }
 
   private runSelfTest(): void {
@@ -440,7 +531,7 @@ struct Index {
             }
             .alignItems(HorizontalAlign.Start)
           }
-          .height(328)
+          .height(280)
           .width('100%')
 
           Column({ space: 9 }) {
@@ -471,22 +562,65 @@ struct Index {
 
           Blank()
 
-          Button() {
+          Column({ space: 8 }) {
             Row({ space: 8 }) {
+              Button('START LIVE')
+                .layoutWeight(1)
+                .height(36)
+                .fontSize(10)
+                .fontWeight(FontWeight.Bold)
+                .fontColor('#12201D')
+                .backgroundColor('#74B7AE')
+                .borderRadius(6)
+                .enabled(!this.audioRunning)
+                .opacity(this.audioRunning ? 0.45 : 1)
+                .onClick(() => {
+                  this.startLiveAudio();
+                })
+              Button('STOP LIVE')
+                .layoutWeight(1)
+                .height(36)
+                .fontSize(10)
+                .fontWeight(FontWeight.Bold)
+                .fontColor('#E2E6E9')
+                .backgroundColor('#2B3035')
+                .borderRadius(6)
+                .enabled(this.audioRunning || this.audioRequested)
+                .opacity(this.audioRunning || this.audioRequested ? 1 : 0.45)
+                .onClick(() => {
+                  this.stopLiveAudio();
+                })
+            }
+            .width('100%')
+
+            Row({ space: 6 }) {
+              Circle()
+                .width(6)
+                .height(6)
+                .fill(this.audioRunning ? '#74B7AE' : '#A15FC2')
+              Text(this.audioStatusText)
+                .fontSize(9)
+                .fontColor(this.audioRunning ? '#A7DCD4' : '#8C969F')
+                .maxLines(2)
+            }
+            .width('100%')
+
+            Button() {
               Text(this.selfTestPassed ? 'PROCESSOR VERIFIED' : 'RUN ENGINE CHECK')
-                .fontSize(11)
+                .fontSize(10)
                 .fontWeight(FontWeight.Bold)
                 .fontColor(this.selfTestPassed ? '#173B35' : '#DDE1E5')
             }
+            .width('100%')
+            .height(34)
+            .borderRadius(6)
+            .backgroundColor(this.selfTestPassed ? '#74B7AE' : '#252A2F')
+            .border({ width: 1, color: this.selfTestPassed ? '#9BE1D7' : '#3B4249' })
+            .onClick(() => {
+              this.runSelfTest();
+            })
           }
           .width('100%')
-          .height(42)
-          .borderRadius(6)
-          .backgroundColor(this.selfTestPassed ? '#74B7AE' : '#252A2F')
-          .border({ width: 1, color: this.selfTestPassed ? '#9BE1D7' : '#3B4249' })
-          .onClick(() => {
-            this.runSelfTest();
-          })
         }
         .width(270)
         .height('100%')
@@ -575,7 +709,9 @@ struct Index {
                   .fontSize(9)
                   .fontColor('#626C74')
                 Blank()
-                Text('48 kHz / 512 frames')
+                Text(this.audioRunning ?
+                  `${Math.floor(this.callbackFrames)} live frames / ${this.underruns} gaps` :
+                  '48 kHz / adaptive callback')
                   .fontSize(9)
                   .fontColor('#626C74')
               }
@@ -585,11 +721,12 @@ struct Index {
             .height('100%')
             .padding(18)
 
-            Canvas()
+            Canvas(this.historyContext)
               .width('100%')
               .height('100%')
               .margin({ top: 50 })
               .onReady(() => {
+                this.canvasReady = true;
                 this.drawHistory();
               })
           }
@@ -668,7 +805,7 @@ struct Index {
             }
             .alignItems(HorizontalAlign.Start)
           }
-          .height(328)
+          .height(280)
           .width('100%')
 
           Scroll() {
@@ -707,7 +844,61 @@ struct Index {
   }
 
   private drawHistory(): void {
-    // The first UI milestone keeps the original real-time analyzer slots visible.
-    // Audio-device metering feeds these values in the next milestone.
+    if (!this.canvasReady) {
+      return;
+    }
+
+    const context = this.historyContext;
+    const width = context.width;
+    const height = context.height;
+    if (width <= 0 || height <= 0) {
+      return;
+    }
+
+    context.clearRect(0, 0, width, height);
+    context.lineWidth = 1;
+    context.strokeStyle = '#262B30';
+    for (let line = 1; line < 4; line++) {
+      const y = height * line / 4;
+      context.beginPath();
+      context.moveTo(0, y);
+      context.lineTo(width, y);
+      context.stroke();
+    }
+
+    this.drawHistoryCurve(context, this.inputHistory, '#74B7AE', width, height);
+    this.drawHistoryCurve(context, this.outputHistory, '#C279D9', width, height);
+  }
+
+  private updateHistory(): void {
+    this.inputHistory.push(Math.max(0, Math.min(1, (this.inputLufs + 60) / 60)));
+    this.outputHistory.push(Math.max(0, Math.min(1, (this.outputLufs + 60) / 60)));
+    if (this.inputHistory.length > 120) {
+      this.inputHistory.splice(0, this.inputHistory.length - 120);
+      this.outputHistory.splice(0, this.outputHistory.length - 120);
+    }
+    this.drawHistory();
+  }
+
+  private drawHistoryCurve(context: CanvasRenderingContext2D, history: number[], color: string,
+    width: number, height: number): void {
+    if (history.length < 2) {
+      return;
+    }
+
+    const step = width / Math.max(1, history.length - 1);
+    context.beginPath();
+    context.lineWidth = 2;
+    context.strokeStyle = color;
+    for (let index = 0; index < history.length; index++) {
+      const x = index * step;
+      const y = height - 8 - history[index] * Math.max(1, height - 16);
+      if (index === 0) {
+        context.moveTo(x, y);
+      } else {
+        context.lineTo(x, y);
+      }
+    }
+    context.stroke();
   }
 }

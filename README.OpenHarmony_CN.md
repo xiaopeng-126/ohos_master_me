@@ -16,8 +16,9 @@ DPF 插件框架和 Pugl 桌面界面组成，主要运行形态是 CLAP、VST�
 
 本次适配保留了原始 Faust DSP 和参数模型，没有重写音频算法。桌面端 DPF/Pugl
 窗口替换为 HarmonyOS Stage 应用和 ArkUI 界面，原生 DSP 则由 NAPI 暴露给
-ArkTS。这样做可以继续复用上游 DSP、预设和参数定义，同时按 HarmonyOS PC
-的应用模型重建窗口、生命周期和后续音频设备接入层。
+ArkTS。设备音频通过 OHAudio 接入：采集回调写入环形缓冲，渲染回调取出输入、
+执行 DSP 并输出监听音频。这样做可以继续复用上游 DSP、预设和参数定义，同时
+按 HarmonyOS PC 的应用模型重建窗口、生命周期和音频设备接入层。
 
 迁移能力包括：
 
@@ -26,7 +27,9 @@ ArkTS。这样做可以继续复用上游 DSP、预设和参数定义，同时�
 - 使用 ArkUI 重建 Easy/Expert 操作界面，适配 `2in1` 设备类型。
 - 复用上游五种 Easy 预设和原有参数语义，保留参数双向读取。
 - 同时构建 `arm64-v8a` 与 `x86_64`，覆盖 HarmonyOS PC 设备和模拟器。
-- 保留上游代码边界，为 OHAudio 全双工音频接入和后续上游同步预留稳定接口。
+- 接入 OHAudio 48 kHz 双声道全双工链路，提供启动、停止、状态和实时电平。
+- 处理麦克风权限、设备变化、音频中断、错误和音频流重建。
+- 保留上游代码边界，为后续上游同步保留稳定的 NAPI 接口。
 
 ## 工程结构
 
@@ -114,10 +117,16 @@ hdc install -r harmony/entry/build/default/outputs/default/entry-default-signed.
 hdc shell aa start -a EntryAbility -b de.fourthohm.masterme -m entry
 ```
 
-应用启动后，点击 `RUN ENGINE CHECK`。输入 440 Hz 双声道测试信号并完成一次
-原生块处理后，界面应显示 `DSP VERIFIED`，同时更新 LUFS 和峰值读数。
+应用启动后：
 
-![master_me running on HarmonyOS PC](docs/master_me-harmonyos-pc.jpeg)
+1. 点击 `START LIVE`。
+2. 首次使用时允许 `ohos.permission.MICROPHONE` 麦克风权限。
+3. 状态显示 `LIVE 48 kHz / 2 CH` 后，输入、输出电平和历史曲线会持续更新。
+4. 点击 `STOP LIVE` 可释放采集与渲染流。
+5. 点击 `RUN ENGINE CHECK` 会处理 440 Hz 双声道测试块，成功后显示
+   `DSP VERIFIED`。
+
+![master_me running on HarmonyOS PC](docs/masterme-v3-live.jpeg)
 
 ## PC 适配实现
 
@@ -132,9 +141,13 @@ hdc shell aa start -a EntryAbility -b de.fourthohm.masterme -m entry
 - 读写指定参数。
 - 接收交错双声道 `Float32Array`，完成块处理。
 - 返回输入/输出 LUFS 和峰值。
+- 创建 `AudioCapturer` 和 `AudioRenderer`，使用 `S16LE / 48 kHz / 2 ch`。
+- 在采集与渲染回调之间维护有界环形缓冲，由渲染回调驱动 DSP。
+- 暴露回调帧数、欠载、溢出、设备变化、恢复次数和最后错误。
 
-对 DSP 的访问通过互斥锁串行化，音频缓冲区按实际帧数扩展，满足当前 UI
-自检和 NAPI 块处理调用。
+对 DSP 的访问通过互斥锁串行化，音频缓冲区按实际帧数扩展。设备变化、中断和
+错误会标记恢复状态，状态轮询按 2 秒节流重建音频流，避免事件回调直接阻塞
+UI 线程。
 
 ### ArkTS 与 NAPI
 
@@ -148,10 +161,13 @@ setParameter(handle, parameterIndex, value)
 getParameter(handle, parameterIndex)
 processInterleaved(handle, input, output, frameCount)
 getMeterSnapshot(handle)
+startAudio(handle)
+stopAudio(handle)
+getAudioStatus(handle)
 ```
 
-`input` 和 `output` 为交错双声道 `Float32Array`。该接口可以作为后续
-OHAudio 采集与播放回调之间的 DSP 边界。
+`input` 和 `output` 为交错双声道 `Float32Array`。`startAudio` 返回当前音频
+状态并启动全双工链路；`getAudioStatus` 用于轮询运行状态和回调统计。
 
 ### ArkUI 界面
 
@@ -160,14 +176,16 @@ HarmonyOS 界面保留上游 Easy/Expert 两种工作方式：
 - Easy 模式提供 YOUTUBE、APPLE PODCASTS、EBU R128、SPEECH、MUSIC 五种预设。
 - Expert 模式提供 Gate、EQ、Leveler、Compression、Limiter 和 Ceiling 参数。
 - 主界面提供输入增益、目标 LUFS、旁路开关、电平历史和引擎自检入口。
-
-当前电平历史区域已保留原设计位置，实时历史曲线需要在 T2 接入设备音频后完成。
+- 主界面提供 `START LIVE`、`STOP LIVE`、流状态、回调帧和欠载统计。
+- 输入/输出 LUFS 历史曲线由 OHAudio 回调持续驱动。
+- 麦克风权限只在用户启动实时监听时申请。
 
 ### 构建与生命周期
 
-原生模块在 `CMakeLists.txt` 中链接 `libace_napi.z.so`，并构建
-`arm64-v8a`、`x86_64` 两种 ABI。Stage 应用在 `aboutToAppear` 创建引擎，
-在 `aboutToDisappear` 释放引擎，避免界面退出后遗留原生实例。
+原生模块在 `CMakeLists.txt` 中链接 `libace_napi.z.so` 与
+`libohaudio.so`，并构建 `arm64-v8a`、`x86_64` 两种 ABI。Stage 应用在
+`aboutToAppear` 创建引擎并启动状态轮询，在 `aboutToDisappear` 停止音频流、
+清除定时器并释放原生引擎。
 
 ## 迁移能力分级
 
@@ -206,7 +224,7 @@ T0 的构建、启动和原生模块加载链路已经打通。当前仓库中�
 | 双声道块处理 | 已完成 | 交错 `Float32Array` 输入/输出 |
 | LUFS / 峰值快照 | 已完成 | 原生返回输入、输出 LUFS 与峰值 |
 | Easy/Expert 模式切换 | 已验证 | Expert 模式在模拟器完整显示且无裁切 |
-| 实时电平历史 | 未完成 | 当前保留图表区域，等待设备音频接入 |
+| 实时电平历史 | 已验证 | OHAudio 回调驱动输入/输出曲线 |
 
 T1 已形成可运行的 DSP/UI 基线，能够通过确定性测试信号验证原生处理链。
 
@@ -214,26 +232,50 @@ T1 已形成可运行的 DSP/UI 基线，能够通过确定性测试信号验证
 
 | 能力 | 状态 | 说明 |
 | --- | --- | --- |
-| OHAudio 全双工音频 | 未完成 | 仍需接入 `AudioCapturer -> DSP -> AudioRenderer` |
-| 默认输入/输出设备 | 未完成 | 尚未枚举并绑定 HarmonyOS PC 音频设备 |
-| 实时监听 | 未完成 | 当前只有显式块处理，没有持续采集和播放 |
-| 实时电平曲线 | 未完成 | 需要由音频回调持续更新 |
-| 设备热插拔 | 未完成 | 尚未处理设备加入、移除和路由变化 |
-| 音频流恢复 | 未完成 | 尚未处理中断、焦点变化和错误恢复 |
-| 低延迟配置 | 未完成 | 采样率、缓冲区和回调策略需在真机调优 |
+| OHAudio 全双工音频 | 模拟器已验证 | `AudioCapturer -> DSP -> AudioRenderer` 持续运行 |
+| 默认输入/输出设备 | 模拟器已验证 | 使用系统默认虚拟麦克风和扬声器路由 |
+| 实时监听 | 模拟器已验证 | 渲染回调持续输出，界面更新输入/输出电平 |
+| 实时电平曲线 | 已验证 | 输入/输出曲线由原生回调数据驱动 |
+| 设备热插拔 | 已实现，待真机验证 | 监听设备变化并触发有节流的流恢复 |
+| 音频流恢复 | 已实现，待故障注入 | 处理暂停、停止、错误和服务状态变化 |
+| 低延迟配置 | 模拟器已验证 | `AUDIOSTREAM_LATENCY_MODE_FAST`，回调帧长自适应 |
+| 麦克风权限 | 已验证 | 首次启动实时监听时弹出权限窗口 |
+| 启动 / 停止 | 已验证 | `START LIVE` 与 `STOP LIVE` 可重复释放和重建流 |
 | 签名发布 HAP | 未完成 | 需配置正式签名并上传 `hap.atomgit.com` |
 
-T2 是当前适配与完整桌面实机体验之间的剩余工作量。现有 `processInterleaved`
-API 已把 DSP 与设备 I/O 解耦，后续 OHAudio 接入不需要改动 Faust DSP 本身。
+T2 的音频主链路已经在 HarmonyOS API 26 `2in1` 模拟器完成运行验收。剩余的
+发布级工作集中在物理 HarmonyOS PC 的真实麦克风/扬声器、拔插故障注入和正式
+签名安装；这些项目不能由当前模拟器环境替代验证。
+
+## 本轮验收记录
+
+验收日期：2026-11-10。环境为 HarmonyOS API 26 `2in1` 模拟器，目标
+`x86_64`，设备地址 `127.0.0.1:5555`。
+
+| 验收项 | 结果 |
+| --- | --- |
+| `hvigorw assembleHap` | 通过，`arm64-v8a` 与 `x86_64` 均构建成功 |
+| `hdc install -r` | 未签名 HAP 安装成功 |
+| `aa start` | `EntryAbility` 启动成功，无白屏或崩溃 |
+| 麦克风权限 | 首次点击 `START LIVE` 正常弹出授权窗口 |
+| OHAudio 启动 | 状态显示 `LIVE 48 kHz / 2 CH` |
+| 持续音频回调 | 20 秒内累计帧数由 557,280 增长到 1,367,040，渲染持续运行 |
+| 运行期稳定性 | 启动阶段后 gaps 保持 128，连续 20 秒未增长 |
+| 实时电平图 | 输入/输出 LUFS 与双色历史曲线持续更新 |
+| `STOP LIVE` | 状态恢复为 `LIVE AUDIO OFF` |
+| 引擎自检 | `RUN ENGINE CHECK` 后显示 `DSP VERIFIED` |
+
+模拟器虚拟采集源在启动/停止过渡阶段可能出现系统级
+`HandleCapturerRead` 超时日志，当前实现通过输入环形缓冲和渲染线程驱动 DSP
+保持输出连续。该现象没有在运行期继续恶化，但物理麦克风的采样质量、实际听感、
+设备拔插和音频焦点恢复仍需在 HarmonyOS PC 真机复核。
 
 ## 当前阶段判定
 
-当前版本满足 T0 的构建、模拟器启动和原生模块加载要求，并完成 T1 的核心
-DSP、预设、参数和界面基线。T2 的真实音频采集、播放、热插拔、流恢复和
-签名发布尚未完成。
-
-因此，本仓库应描述为“可在 HarmonyOS PC 模拟器运行的 T1 适配基线”，而不是
-已经具备完整直播音频链路的 T2 发布版本。
+当前版本已满足 T0、T1，并在 API 26 `2in1` 模拟器上完成 T2 的 OHAudio
+全双工、实时监听、状态统计、启动停止、权限和实时电平曲线验收。由于尚未在
+物理 HarmonyOS PC 上验证真实设备拔插、音频焦点恢复和签名安装，仓库状态应
+描述为“T2 模拟器验收通过，真机发布验收待完成”。
 
 ## 上游同步
 

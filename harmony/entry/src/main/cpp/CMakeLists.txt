@@ -35,4 +35,4 @@ target_compile_options(masterme PRIVATE
   -Wno-ignored-qualifiers
 )
 
-target_link_libraries(masterme PUBLIC libace_napi.z.so)
+target_link_libraries(masterme PUBLIC libace_napi.z.so libohaudio.so)
