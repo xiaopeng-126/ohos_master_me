@@ -9,6 +9,8 @@ desktop DPF/Pugl interface with an ArkUI Stage application.
 [![master_me running on HarmonyOS PC](docs/master_me-harmonyos-pc.jpeg)](HARMONYOS.md)
 
 See [HARMONYOS.md](HARMONYOS.md) for the current scope, build steps and native API.
+See [README.OpenHarmony_CN.md](README.OpenHarmony_CN.md) for the Chinese
+OpenHarmony PC adaptation guide, capability stages and verification record.
 
 # Installers & Compatibility
 
