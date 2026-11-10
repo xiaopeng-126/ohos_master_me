@@ -73,6 +73,6 @@ allows the DSP and UI to be tested independently of the audio device.
 
 - Project: `trummerschlunk/master_me`
 - Upstream revision imported for this port: `ea93d78a2b0406805c4993ba95badc0acee0a92c`
-- DPF and DPF-Widgets are vendored at the revisions pinned by the upstream
+- DPF, DPF-Widgets and Pugl are vendored at the revisions pinned by the upstream
   project, so no recursive submodule checkout is required.
 - License: GPL-3.0-or-later, see `LICENSE`.
