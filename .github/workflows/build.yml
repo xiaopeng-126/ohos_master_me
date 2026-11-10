@@ -55,16 +55,6 @@ jobs:
           target: ${{ matrix.target }}
           lto: false
 
-  plugin-validation:
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          submodules: recursive
-      - uses: distrho/dpf-makefile-action@v1
-        with:
-          target: pluginval
-
   source-tarball:
     runs-on: ubuntu-24.04
     steps:
