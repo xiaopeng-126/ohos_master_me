@@ -1,0 +1,11 @@
+{
+  "name": "entry",
+  "version": "1.0.0",
+  "description": "master_me HarmonyOS PC entry module",
+  "main": "",
+  "author": "",
+  "license": "GPL-3.0-or-later",
+  "dependencies": {
+    "libmasterme.so": "file:./src/main/cpp/types/libmasterme"
+  }
+}

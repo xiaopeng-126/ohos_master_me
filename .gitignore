@@ -1,0 +1,24 @@
+/bin/
+/bench/master_me/*.*
+/build/
+/.cache/
+compile_commands.json
+/master_me
+/plugin/jucewrapper/build
+/plugin/jucewrapper/JUCE
+*~
+
+# HarmonyOS / DevEco Studio
+/.hvigor/
+/.idea/
+/local.properties
+/harmony/**/.hvigor/
+/harmony/**/build/
+/harmony/**/oh_modules/
+/harmony/**/.preview/
+/harmony/**/.cxx/
+*.hap
+*.app
+
+# Local emulator captures
+/harmony/*.jpeg

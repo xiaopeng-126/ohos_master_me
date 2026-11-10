@@ -1,0 +1,6 @@
+{
+  "name": "libmasterme.so",
+  "version": "1.0.0",
+  "description": "master_me native DSP bridge",
+  "types": "./Index.d.ts"
+}

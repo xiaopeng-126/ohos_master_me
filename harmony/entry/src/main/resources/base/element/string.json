@@ -1,0 +1,16 @@
+{
+  "string": [
+    {
+      "name": "module_desc",
+      "value": "Automatic mastering for HarmonyOS PC"
+    },
+    {
+      "name": "EntryAbility_desc",
+      "value": "master_me automatic mastering"
+    },
+    {
+      "name": "EntryAbility_label",
+      "value": "master_me"
+    }
+  ]
+}
