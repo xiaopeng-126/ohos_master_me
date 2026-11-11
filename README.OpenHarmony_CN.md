@@ -3,7 +3,7 @@
 本文记录 `master_me` 迁移到 OpenHarmony PC 的工程结构、技术路线、编译运行方法和
 T0/T1/T2 能力完成情况。
 
-- OpenHarmony PC 适配仓库：<https://github.com/xiaopeng-126/ohos_master_me>
+- OpenHarmony PC 适配仓库：<https://gitcode.com/OpenHarmonyPCDeveloper/ohos_master_me>
 - 上游项目：<https://github.com/trummerschlunk/master_me>
 - 上游导入版本：`ea93d78a2b0406805c4993ba95badc0acee0a92c`
 - 开源许可证：GPL-3.0-or-later
@@ -75,7 +75,7 @@ Bundle ID 为 `de.fourthohm.masterme`，当前应用版本为 `1.3.2-ohos.1`。
 ### 1. 获取源码
 
 ```powershell
-git clone https://github.com/xiaopeng-126/ohos_master_me.git
+git clone https://gitcode.com/OpenHarmonyPCDeveloper/ohos_master_me.git
 cd ohos_master_me
 ```
 
